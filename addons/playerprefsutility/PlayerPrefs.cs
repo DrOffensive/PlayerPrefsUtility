@@ -1,9 +1,14 @@
 /// PlayerPrefs
 /// by MarcWerk
-/// October 2023
+/// October 2023 (last modified: Janurary 2024)
 /// 
 /// A quick way to store and retrieve small amounts of data.
 /// Uses Windows registry when running in windows, otherwise it uses a collection of files in local storage
+/// 
+/// Change Log:
+///  (Jan. 2024)
+///  - Fixed a case where Registry.CurrentUser can be null until something is written to it.
+///  - Made fallback to using filesystem registry if despite above fix Registry.CurrentUser is still null
 
 using Godot;
 using System;
@@ -14,8 +19,50 @@ using Microsoft.Win32;
 
 public static class PlayerPrefs
 {
-    //static string registyPath => $@"HKEY_CURRENT_USER\Software\{AppName}";
     static string registyPath => $@"Software\{AppName}";
+
+#if GODOT_WINDOWS
+
+    static RegistryKey _currentUser;
+
+    static RegistryKey CurrentUser
+    {
+        get
+        {
+            if(_currentUser == null)
+                CreateCurrentUser();
+            return _currentUser;
+        }
+    }
+
+    static bool useFileSystemFallback = false;
+
+    static void CreateCurrentUser ()
+    {
+#pragma warning disable CA1416
+        try
+        {
+            _currentUser = Registry.CurrentUser.OpenSubKey(registyPath, true);
+        } catch
+        {
+            GD.Print("Creating Registry.CurrentUser...");
+            try
+            {
+                _currentUser = Registry.CurrentUser.CreateSubKey(registyPath, true);
+                _currentUser.SetValue(AppName, true);
+                GD.Print("Created Registry.CurrentUser");
+            } catch (Exception e)
+            {
+                useFileSystemFallback = true;
+                _currentUser = null;
+                GD.PrintErr("Failed to create Registry.CurrentUser, using filesystem callback");
+            }
+        }
+#pragma warning restore CA1416
+    }
+
+#endif
+
     static string AppName
     {
         get
@@ -29,10 +76,18 @@ public static class PlayerPrefs
         get
         {
 #if GODOT_WINDOWS
+
+            if(useFileSystemFallback || CurrentUser == null)
+            {
+                CheckDir();
+                DirAccess dir = DirAccess.Open(filePath);
+                return dir.GetFiles() ?? new string[0];
+            }
+
             try
             {
 #pragma warning disable CA1416
-                string[] subKeys = Registry.CurrentUser.OpenSubKey(registyPath).GetValueNames();
+                string[] subKeys = CurrentUser.GetValueNames();
 #pragma warning restore CA1416
                 return subKeys;
             } catch (Exception e)
@@ -52,10 +107,17 @@ public static class PlayerPrefs
     public static void SetValue<T> (string key, T value)
     {
 #if GODOT_WINDOWS
+
+        if(useFileSystemFallback || CurrentUser == null)
+        {
+            SetLocal(key, value.ToString());
+            return;
+        }
+
         try
         {
 #pragma warning disable CA1416
-            Registry.CurrentUser.OpenSubKey(registyPath, true).SetValue(key, value);
+            CurrentUser.SetValue(key, value);
 #pragma warning restore CA1416
         }
         catch (Exception e) 
@@ -71,13 +133,21 @@ public static class PlayerPrefs
     {
         try
         {
+            object val;
 #if GODOT_WINDOWS
+
+            if(useFileSystemFallback || CurrentUser == null)
+            {
+                val = GetLocal(key);
+            } else 
+            { 
 #pragma warning disable CA1416
-            object val = Registry.CurrentUser.OpenSubKey(registyPath).GetValue(key);
+                val = CurrentUser.GetValue(key);
 #pragma warning restore CA1416
 #else
-            object val = GetLocal(key);
+                val = GetLocal(key);
 #endif
+            }
 
             if (val == null)
             {
@@ -107,10 +177,17 @@ public static class PlayerPrefs
     public static void DeleteValue (string key)
     {
 #if GODOT_WINDOWS
+
+        if(useFileSystemFallback || CurrentUser == null)
+        {
+            DeleteLocal(key);
+            return;
+        }
+
         try
         {
 #pragma warning disable CA1416
-            RegistryKey registryKey = Registry.CurrentUser.OpenSubKey(registyPath, true);
+            RegistryKey registryKey = CurrentUser;
 #pragma warning restore CA1416
 
             if (registryKey != null)

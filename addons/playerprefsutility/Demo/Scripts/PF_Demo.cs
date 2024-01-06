@@ -53,9 +53,7 @@ public partial class PF_Demo : Node
         if (string.IsNullOrEmpty(keyField.Text.Trim()))
             Warn("Key cannot be empty!");
         else
-        {
             PlayerPrefs.SetString(keyField.Text, valueField.Text);
-        }
 
         BuildList();
     }
